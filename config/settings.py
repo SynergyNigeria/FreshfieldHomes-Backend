@@ -102,7 +102,7 @@ DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024  # 10 MB per upload
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 CORS_ALLOWED_ORIGINS = [
-    "https://home.freshfieldsinc.com",
+    "https://homes.freshfieldsinc.com",
     "https://freshfields-home.pages.dev",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
