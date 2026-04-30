@@ -4,21 +4,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     AgentViewSet,
     ChatInquiryViewSet,
-    ContactMessageViewSet,
-    CounterPayRequestViewSet,
-    PartialHomeViewSet,
-    PropertyViewSet,
-    agent_portal_chat_thread_messages,
-    agent_portal_chat_threads,
-    agent_portal_login,
-    agent_portal_messages,
-    agent_portal_properties,
-    apartment_city_options,
-    upload_images,
-)
-from .views import (
-    AgentViewSet,
-    ChatInquiryViewSet,
+    cloudinary_connectivity,
     ContactMessageViewSet,
     CounterPayRequestViewSet,
     PartialHomeViewSet,
@@ -47,16 +33,7 @@ router.register(r"chat-inquiries", ChatInquiryViewSet, basename="chat-inquiry")
 urlpatterns = [
     path("", include(router.urls)),
     path("meta/apartment-cities/", apartment_city_options, name="apartment-city-options"),
-    path("upload-images/", upload_images, name="upload-images"),
-    path("agent-portal/login/", agent_portal_login, name="agent-portal-login"),
-    path("agent-portal/properties/", agent_portal_properties, name="agent-portal-properties"),
-    path("agent-portal/messages/", agent_portal_messages, name="agent-portal-messages"),
-    path("agent-portal/chat-threads/", agent_portal_chat_threads, name="agent-portal-chat-threads"),
-    path("agent-portal/chat-threads/<int:thread_id>/messages/", agent_portal_chat_thread_messages, name="agent-portal-chat-thread-messages"),
-]
-urlpatterns = [
-    path("", include(router.urls)),
-    path("meta/apartment-cities/", apartment_city_options, name="apartment-city-options"),
+    path("meta/cloudinary-connectivity/", cloudinary_connectivity, name="cloudinary-connectivity"),
     path("upload-images/", upload_images, name="upload-images"),
     path("agent-portal/login/", agent_portal_login, name="agent-portal-login"),
     path("agent-portal/properties/", agent_portal_properties, name="agent-portal-properties"),

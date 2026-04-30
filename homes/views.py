@@ -1,4 +1,5 @@
 import os
+import socket
 
 import cloudinary.uploader
 from django.conf import settings
@@ -7,7 +8,6 @@ from rest_framework import mixins, permissions, status, viewsets
 from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
 
-from .models import Agent, ChatInquiry, ContactMessage, CounterPayRequest, LiveChatThread, PartialHome, Property
 from .models import Agent, ChatInquiry, ContactMessage, CounterPayRequest, LiveChatMessage, LiveChatThread, PartialHome, Property
 from .permissions import HasAgentCode, HasOwnerAdminCode
 from .serializers import (
@@ -209,6 +209,35 @@ def apartment_city_options(_request):
 _ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 
 
+@api_view(["GET"])
+def cloudinary_connectivity(_request):
+    host = "api.cloudinary.com"
+    port = 443
+    try:
+        with socket.create_connection((host, port), timeout=5):
+            pass
+    except OSError as exc:
+        return Response(
+            {
+                "reachable": False,
+                "host": host,
+                "port": port,
+                "detail": "Backend cannot reach Cloudinary over HTTPS.",
+                "error": str(exc),
+            },
+            status=503,
+        )
+
+    return Response(
+        {
+            "reachable": True,
+            "host": host,
+            "port": port,
+            "detail": "Backend can reach Cloudinary over HTTPS.",
+        }
+    )
+
+
 @api_view(["POST"])
 def upload_images(request):
     if not HasOwnerAdminCode().has_permission(request, None):
@@ -238,11 +267,21 @@ def upload_images(request):
                 status=400,
             )
 
-        uploaded = cloudinary.uploader.upload(
-            file,
-            folder="fresh-fields-homes",
-            resource_type="image",
-        )
+        try:
+            uploaded = cloudinary.uploader.upload(
+                file,
+                folder="fresh-fields-homes",
+                resource_type="image",
+            )
+        except Exception as exc:
+            return Response(
+                {
+                    "detail": "Image upload service is temporarily unreachable from backend.",
+                    "hint": "On PythonAnywhere, allow outbound access to api.cloudinary.com:443.",
+                    "error": str(exc),
+                },
+                status=503,
+            )
         urls.append(uploaded.get("secure_url") or uploaded.get("url"))
 
     return Response({"urls": urls})
