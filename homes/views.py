@@ -1,7 +1,9 @@
 import os
 import socket
+import time
 
 import cloudinary.uploader
+import cloudinary.utils
 from django.conf import settings
 from django.db.models import Q
 from rest_framework import mixins, permissions, status, viewsets
@@ -239,6 +241,43 @@ def cloudinary_connectivity(_request):
 
 
 @api_view(["POST"])
+def cloudinary_upload_signature(request):
+    if not HasOwnerAdminCode().has_permission(request, None):
+        return Response({"detail": "Forbidden."}, status=403)
+
+    if not (
+        settings.CLOUDINARY_CLOUD_NAME
+        and settings.CLOUDINARY_API_KEY
+        and settings.CLOUDINARY_API_SECRET
+    ):
+        return Response(
+            {"detail": "Cloudinary is not configured. Set Cloudinary keys in backend/.env."},
+            status=500,
+        )
+
+    folder = "fresh-fields-homes"
+    timestamp = int(time.time())
+    params_to_sign = {
+        "folder": folder,
+        "timestamp": timestamp,
+    }
+    signature = cloudinary.utils.api_sign_request(
+        params_to_sign,
+        settings.CLOUDINARY_API_SECRET,
+    )
+
+    return Response(
+        {
+            "cloudName": settings.CLOUDINARY_CLOUD_NAME,
+            "apiKey": settings.CLOUDINARY_API_KEY,
+            "folder": folder,
+            "timestamp": timestamp,
+            "signature": signature,
+        }
+    )
+
+
+@api_view(["POST"])
 def upload_images(request):
     if not HasOwnerAdminCode().has_permission(request, None):
         return Response({"detail": "Forbidden."}, status=403)
@@ -277,7 +316,7 @@ def upload_images(request):
             return Response(
                 {
                     "detail": "Image upload service is temporarily unreachable from backend.",
-                    "hint": "On PythonAnywhere, allow outbound access to api.cloudinary.com:443.",
+                    "hint": "Use /api/cloudinary-upload-signature/ and upload from browser directly.",
                     "error": str(exc),
                 },
                 status=503,
