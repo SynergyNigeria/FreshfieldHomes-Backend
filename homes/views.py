@@ -571,13 +571,11 @@ def agent_application_status(request):
 @api_view(["POST"])
 def agent_application_initialize_payment(request):
     """
-    Initializes a Paystack transaction for the $25 agent registration fee.
-    Fetches the live USD/NGN exchange rate, converts $25 to kobo, and
-    calls the Paystack initialize endpoint. Returns the access_code and
-    authorization_url to the frontend.
+    Validates the applicant and returns the NGN kobo amount for $25.
+    The frontend uses this amount to open the Paystack inline popup directly
+    (no server-side Paystack API call needed — avoids IP/firewall issues).
     """
     import urllib.request
-    import urllib.error
     import json as _json
 
     email = (request.data.get("email") or "").strip().lower()
@@ -591,7 +589,7 @@ def agent_application_initialize_payment(request):
     except AgentApplication.DoesNotExist:
         return Response({"detail": "Application not found."}, status=404)
 
-    if application.status not in ("approved",):
+    if application.status != "approved":
         return Response({"detail": "Application is not in an approved state."}, status=400)
 
     if application.payment_token != token:
@@ -605,51 +603,11 @@ def agent_application_initialize_payment(request):
             rate_data = _json.loads(resp.read())
         ngn_rate = float(rate_data["rates"]["NGN"])
     except Exception:
-        # Fallback rate if exchange API is unavailable
-        ngn_rate = 1600.0
+        ngn_rate = 1600.0  # Fallback if exchange API is unavailable
 
-    amount_naira = 25 * ngn_rate
-    amount_kobo = int(round(amount_naira * 100))
-
-    paystack_secret = settings.PAYSTACK_SECRET_KEY
-    payload = _json.dumps({
-        "email": email,
-        "amount": amount_kobo,
-        "currency": "NGN",
-        "metadata": {
-            "payment_token": token,
-            "custom_fields": [
-                {"display_name": "Application Email", "variable_name": "email", "value": email}
-            ],
-        },
-    }).encode("utf-8")
-
-    req = urllib.request.Request(
-        "https://api.paystack.co/transaction/initialize",
-        data=payload,
-        headers={
-            "Authorization": f"Bearer {paystack_secret}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            ps_data = _json.loads(resp.read())
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode("utf-8", errors="replace")
-        return Response({"detail": f"Paystack error: {error_body}"}, status=502)
-    except Exception as exc:
-        return Response({"detail": f"Could not reach Paystack: {exc}"}, status=502)
-
-    if not ps_data.get("status"):
-        return Response({"detail": ps_data.get("message", "Paystack init failed.")}, status=502)
+    amount_kobo = int(round(25 * ngn_rate * 100))
 
     return Response({
-        "authorization_url": ps_data["data"]["authorization_url"],
-        "access_code": ps_data["data"]["access_code"],
-        "reference": ps_data["data"]["reference"],
         "amount_kobo": amount_kobo,
         "ngn_rate": ngn_rate,
     })

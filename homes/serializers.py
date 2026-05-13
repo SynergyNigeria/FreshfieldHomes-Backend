@@ -393,7 +393,7 @@ class AgentApplicationSerializer(serializers.ModelSerializer):
         model = AgentApplication
         fields = [
             "id", "full_name", "country", "email", "phone",
-            "status", "rejection_reason", "created_at", "updated_at",
+            "status", "rejection_reason", "payment_token", "created_at", "updated_at",
         ]
 
 
