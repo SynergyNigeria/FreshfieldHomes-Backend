@@ -13,6 +13,7 @@ from .views import (
     agent_application_complete_payment,
     agent_application_create,
     agent_application_decide,
+    agent_application_initialize_payment,
     agent_application_list,
     agent_application_status,
     agent_portal_chat_thread_messages,
@@ -56,5 +57,6 @@ urlpatterns = [
     path("agent-applications/list/", agent_application_list, name="agent-application-list"),
     path("agent-applications/status/", agent_application_status, name="agent-application-status"),
     path("agent-applications/<int:app_id>/decide/", agent_application_decide, name="agent-application-decide"),
+    path("agent-applications/initialize-payment/", agent_application_initialize_payment, name="agent-application-initialize-payment"),
     path("agent-applications/complete-payment/", agent_application_complete_payment, name="agent-application-complete-payment"),
 ]

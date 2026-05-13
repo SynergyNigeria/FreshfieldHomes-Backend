@@ -569,12 +569,17 @@ def agent_application_status(request):
 
 
 @api_view(["POST"])
-def agent_application_complete_payment(request):
+def agent_application_initialize_payment(request):
     """
-    Called after the $25 payment is confirmed client-side.
-    Verifies the payment_token, creates an Agent record, and marks the
-    application as paid/activated.
+    Initializes a Paystack transaction for the $25 agent registration fee.
+    Fetches the live USD/NGN exchange rate, converts $25 to kobo, and
+    calls the Paystack initialize endpoint. Returns the access_code and
+    authorization_url to the frontend.
     """
+    import urllib.request
+    import urllib.error
+    import json as _json
+
     email = (request.data.get("email") or "").strip().lower()
     token = (request.data.get("payment_token") or "").strip()
 
@@ -586,14 +591,129 @@ def agent_application_complete_payment(request):
     except AgentApplication.DoesNotExist:
         return Response({"detail": "Application not found."}, status=404)
 
+    if application.status not in ("approved",):
+        return Response({"detail": "Application is not in an approved state."}, status=400)
+
+    if application.payment_token != token:
+        return Response({"detail": "Invalid payment token."}, status=400)
+
+    # Fetch live USD→NGN rate
+    try:
+        with urllib.request.urlopen(
+            "https://open.er-api.com/v6/latest/USD", timeout=5
+        ) as resp:
+            rate_data = _json.loads(resp.read())
+        ngn_rate = float(rate_data["rates"]["NGN"])
+    except Exception:
+        # Fallback rate if exchange API is unavailable
+        ngn_rate = 1600.0
+
+    amount_naira = 25 * ngn_rate
+    amount_kobo = int(round(amount_naira * 100))
+
+    paystack_secret = settings.PAYSTACK_SECRET_KEY
+    payload = _json.dumps({
+        "email": email,
+        "amount": amount_kobo,
+        "currency": "NGN",
+        "metadata": {
+            "payment_token": token,
+            "custom_fields": [
+                {"display_name": "Application Email", "variable_name": "email", "value": email}
+            ],
+        },
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        "https://api.paystack.co/transaction/initialize",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {paystack_secret}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            ps_data = _json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode("utf-8", errors="replace")
+        return Response({"detail": f"Paystack error: {error_body}"}, status=502)
+    except Exception as exc:
+        return Response({"detail": f"Could not reach Paystack: {exc}"}, status=502)
+
+    if not ps_data.get("status"):
+        return Response({"detail": ps_data.get("message", "Paystack init failed.")}, status=502)
+
+    return Response({
+        "authorization_url": ps_data["data"]["authorization_url"],
+        "access_code": ps_data["data"]["access_code"],
+        "reference": ps_data["data"]["reference"],
+        "amount_kobo": amount_kobo,
+        "ngn_rate": ngn_rate,
+    })
+
+
+@api_view(["POST"])
+def agent_application_complete_payment(request):
+    """
+    Called after Paystack payment succeeds.
+    Verifies the Paystack reference with their API, checks the payment_token,
+    creates an Agent record, and marks the application as paid/activated.
+    """
+    import urllib.request
+    import urllib.error
+    import json as _json
+
+    email = (request.data.get("email") or "").strip().lower()
+    token = (request.data.get("payment_token") or "").strip()
+    paystack_reference = (request.data.get("paystack_reference") or "").strip()
+
+    if not email or not token:
+        return Response({"detail": "email and payment_token are required."}, status=400)
+
+    try:
+        application = AgentApplication.objects.get(email__iexact=email)
+    except AgentApplication.DoesNotExist:
+        return Response({"detail": "Application not found."}, status=404)
+
+    if application.status == "paid":
+        return Response({"detail": "Already activated."}, status=400)
+
     if application.status != "approved":
         return Response({"detail": "Application is not approved."}, status=400)
 
     if application.payment_token != token:
         return Response({"detail": "Invalid payment token."}, status=400)
 
-    if application.status == "paid":
-        return Response({"detail": "Already activated."}, status=400)
+    # Verify the Paystack payment reference
+    if not paystack_reference:
+        return Response({"detail": "paystack_reference is required."}, status=400)
+
+    paystack_secret = settings.PAYSTACK_SECRET_KEY
+    verify_req = urllib.request.Request(
+        f"https://api.paystack.co/transaction/verify/{paystack_reference}",
+        headers={"Authorization": f"Bearer {paystack_secret}"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(verify_req, timeout=10) as resp:
+            ps_data = _json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode("utf-8", errors="replace")
+        return Response({"detail": f"Paystack verification error: {error_body}"}, status=502)
+    except Exception as exc:
+        return Response({"detail": f"Could not reach Paystack: {exc}"}, status=502)
+
+    tx = ps_data.get("data", {})
+    if tx.get("status") != "success":
+        return Response({"detail": "Payment was not successful."}, status=400)
+
+    # Sanity-check: amount must be ≥ $25 worth of kobo (allow minor fx rounding, require ≥ $24)
+    MIN_KOBO = int(24 * 1400 * 100)  # $24 at ₦1400 floor — very conservative guard
+    if tx.get("amount", 0) < MIN_KOBO:
+        return Response({"detail": "Payment amount is insufficient."}, status=400)
 
     # Create the Agent record if not already there
     agent, created = Agent.objects.get_or_create(
@@ -606,7 +726,6 @@ def agent_application_complete_payment(request):
         },
     )
     if not created:
-        # Update name/phone in case they changed
         agent.name = application.full_name
         agent.phone = application.phone
         agent.save(update_fields=["name", "phone"])
