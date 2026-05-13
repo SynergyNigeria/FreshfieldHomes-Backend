@@ -37,6 +37,12 @@ class PropertyStatus(models.TextChoices):
     SOLD = "sold", "Sold"
 
 
+class PropertyApprovalStatus(models.TextChoices):
+    APPROVED = "approved", "Approved"
+    PENDING_APPROVAL = "pending_approval", "Pending Approval"
+    REJECTED = "rejected", "Rejected"
+
+
 class RequestStatus(models.TextChoices):
     NEW = "new", "New"
     CONTACTED = "contacted", "Contacted"
@@ -95,6 +101,11 @@ class Property(models.Model):
     description = models.TextField()
     agent = models.ForeignKey(Agent, on_delete=models.PROTECT, related_name="properties")
     is_featured = models.BooleanField(default=False)
+    approval_status = models.CharField(
+        max_length=20,
+        choices=PropertyApprovalStatus.choices,
+        default=PropertyApprovalStatus.APPROVED,
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

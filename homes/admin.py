@@ -44,9 +44,10 @@ class AgentAdmin(admin.ModelAdmin):
 
 @admin.register(Property)
 class PropertyAdmin(admin.ModelAdmin):
-    list_display = ("public_id", "title", "city", "state", "property_type", "status", "price", "is_featured")
-    list_filter = ("property_type", "status", "city", "state", "is_featured")
+    list_display = ("public_id", "title", "city", "state", "property_type", "status", "approval_status", "price", "is_featured")
+    list_filter = ("property_type", "status", "approval_status", "city", "state", "is_featured")
     search_fields = ("public_id", "title", "address", "city", "state")
+    list_editable = ("approval_status",)
     inlines = [PropertyImageInline, PropertyFeatureInline]
 
 

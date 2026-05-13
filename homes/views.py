@@ -72,6 +72,10 @@ class PropertyViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = Property.objects.select_related("agent").prefetch_related("images", "features")
 
+        # Public requests only see admin-approved listings
+        if not self._is_admin_request():
+            queryset = queryset.filter(approval_status="approved")
+
         search = self.request.query_params.get("search")
         prop_type = self.request.query_params.get("type")
         city = self.request.query_params.get("city")
@@ -505,9 +509,89 @@ def agent_portal_chat_thread_reply(request, thread_id):
     return Response(LiveChatMessageSerializer(message).data, status=201)
 
 
-# ---------------------------------------------------------------------------
-# Agent application views
-# ---------------------------------------------------------------------------
+@api_view(["POST"])
+def agent_portal_submit_listing(request):
+    """
+    Agent submits a new property listing for admin approval.
+    Required fields: title, address, city, state, price, bedrooms, bathrooms,
+                     sqft, year_built, property_type, description, image
+    Optional: imageUrls (list), features (list of strings)
+    """
+    agent = _get_agent_from_request(request)
+    if not agent:
+        return Response({"detail": "Unauthorized."}, status=401)
+
+    data = request.data
+    required = ["title", "address", "city", "state", "price", "bedrooms",
+                "bathrooms", "sqft", "year_built", "property_type", "description", "image"]
+    missing = [f for f in required if not data.get(f)]
+    if missing:
+        return Response({"detail": f"Missing fields: {', '.join(missing)}"}, status=400)
+
+    try:
+        prop = Property.objects.create(
+            title=data["title"],
+            address=data["address"],
+            city=data["city"],
+            state=data["state"],
+            price=data["price"],
+            bedrooms=int(data["bedrooms"]),
+            bathrooms=int(data["bathrooms"]),
+            sqft=int(data["sqft"]),
+            year_built=int(data["year_built"]),
+            property_type=data["property_type"],
+            description=data["description"],
+            image=data["image"],
+            agent=agent,
+            status="for-sale",
+            approval_status="pending_approval",
+        )
+    except Exception as exc:
+        return Response({"detail": str(exc)}, status=400)
+
+    for url in (data.get("imageUrls") or []):
+        if url:
+            PropertyImage.objects.create(property=prop, image=url)
+
+    for feat in (data.get("features") or []):
+        if feat:
+            PropertyFeature.objects.create(property=prop, name=feat)
+
+    return Response({
+        "id": prop.public_id,
+        "approval_status": prop.approval_status,
+        "detail": "Listing submitted for admin review.",
+    }, status=201)
+
+
+@api_view(["GET"])
+def agent_portal_my_listings(request):
+    """Returns all listings submitted by this agent (including pending ones)."""
+    agent = _get_agent_from_request(request)
+    if not agent:
+        return Response({"detail": "Unauthorized."}, status=401)
+    props = Property.objects.filter(agent=agent).prefetch_related("images", "features")
+    data = []
+    for p in props:
+        data.append({
+            "id": p.public_id,
+            "title": p.title,
+            "city": p.city,
+            "state": p.state,
+            "price": str(p.price),
+            "bedrooms": p.bedrooms,
+            "bathrooms": p.bathrooms,
+            "sqft": p.sqft,
+            "image": p.image,
+            "type": p.property_type,
+            "status": p.status,
+            "approval_status": p.approval_status,
+            "yearBuilt": p.year_built,
+        })
+    return Response(data)
+
+
+
 
 @api_view(["POST"])
 def agent_application_create(request):
@@ -553,6 +637,47 @@ def agent_application_decide(request, app_id):
 
     serializer.save()
     return Response(AgentApplicationSerializer(application).data)
+
+
+@api_view(["POST"])
+def admin_decide_listing(request, public_id):
+    """Admin: approve or reject an agent-submitted listing."""
+    if not HasOwnerAdminCode().has_permission(request, None):
+        return Response({"detail": "Forbidden."}, status=403)
+
+    prop = Property.objects.filter(public_id=public_id).first()
+    if not prop:
+        return Response({"detail": "Not found."}, status=404)
+
+    decision = (request.data.get("action") or "").strip()
+    if decision not in ("approve", "reject"):
+        return Response({"detail": "action must be 'approve' or 'reject'."}, status=400)
+
+    prop.approval_status = "approved" if decision == "approve" else "rejected"
+    prop.save(update_fields=["approval_status"])
+    return Response({"id": prop.public_id, "approval_status": prop.approval_status})
+
+
+@api_view(["GET"])
+def admin_pending_listings(request):
+    """Admin: list all listings that are pending approval."""
+    if not HasOwnerAdminCode().has_permission(request, None):
+        return Response({"detail": "Forbidden."}, status=403)
+    props = Property.objects.filter(approval_status="pending_approval").select_related("agent")
+    data = []
+    for p in props:
+        data.append({
+            "id": p.public_id,
+            "title": p.title,
+            "city": p.city,
+            "state": p.state,
+            "price": str(p.price),
+            "image": p.image,
+            "approval_status": p.approval_status,
+            "agent": p.agent.name if p.agent else None,
+            "created_at": p.created_at.isoformat(),
+        })
+    return Response(data)
 
 
 @api_view(["GET"])
