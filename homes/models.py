@@ -281,6 +281,8 @@ class AgentApplication(models.Model):
     rejection_reason = models.TextField(blank=True)
     # Set when admin approves — used to verify the $25 payment session
     payment_token = models.CharField(max_length=64, blank=True)
+    # Stored for reconciliation in the Paystack dashboard
+    paystack_reference = models.CharField(max_length=100, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

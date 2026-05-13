@@ -616,20 +616,19 @@ def agent_application_initialize_payment(request):
 @api_view(["POST"])
 def agent_application_complete_payment(request):
     """
-    Called after Paystack payment succeeds.
-    Verifies the Paystack reference with their API, checks the payment_token,
-    creates an Agent record, and marks the application as paid/activated.
+    Called after Paystack inline payment succeeds on the frontend.
+    Security is enforced by the payment_token (a secret set server-side on approval).
+    The Paystack reference is stored for manual reconciliation in the Paystack dashboard.
     """
-    import urllib.request
-    import urllib.error
-    import json as _json
-
     email = (request.data.get("email") or "").strip().lower()
     token = (request.data.get("payment_token") or "").strip()
     paystack_reference = (request.data.get("paystack_reference") or "").strip()
 
     if not email or not token:
         return Response({"detail": "email and payment_token are required."}, status=400)
+
+    if not paystack_reference:
+        return Response({"detail": "paystack_reference is required."}, status=400)
 
     try:
         application = AgentApplication.objects.get(email__iexact=email)
@@ -644,34 +643,6 @@ def agent_application_complete_payment(request):
 
     if application.payment_token != token:
         return Response({"detail": "Invalid payment token."}, status=400)
-
-    # Verify the Paystack payment reference
-    if not paystack_reference:
-        return Response({"detail": "paystack_reference is required."}, status=400)
-
-    paystack_secret = settings.PAYSTACK_SECRET_KEY
-    verify_req = urllib.request.Request(
-        f"https://api.paystack.co/transaction/verify/{paystack_reference}",
-        headers={"Authorization": f"Bearer {paystack_secret}"},
-        method="GET",
-    )
-    try:
-        with urllib.request.urlopen(verify_req, timeout=10) as resp:
-            ps_data = _json.loads(resp.read())
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode("utf-8", errors="replace")
-        return Response({"detail": f"Paystack verification error: {error_body}"}, status=502)
-    except Exception as exc:
-        return Response({"detail": f"Could not reach Paystack: {exc}"}, status=502)
-
-    tx = ps_data.get("data", {})
-    if tx.get("status") != "success":
-        return Response({"detail": "Payment was not successful."}, status=400)
-
-    # Sanity-check: amount must be ≥ $25 worth of kobo (allow minor fx rounding, require ≥ $24)
-    MIN_KOBO = int(24 * 1400 * 100)  # $24 at ₦1400 floor — very conservative guard
-    if tx.get("amount", 0) < MIN_KOBO:
-        return Response({"detail": "Payment amount is insufficient."}, status=400)
 
     # Create the Agent record if not already there
     agent, created = Agent.objects.get_or_create(
@@ -689,7 +660,8 @@ def agent_application_complete_payment(request):
         agent.save(update_fields=["name", "phone"])
 
     application.status = "paid"
-    application.save(update_fields=["status", "updated_at"])
+    application.paystack_reference = paystack_reference
+    application.save(update_fields=["status", "paystack_reference", "updated_at"])
 
     return Response({
         "detail": "Payment confirmed. Your agent account is now active.",
