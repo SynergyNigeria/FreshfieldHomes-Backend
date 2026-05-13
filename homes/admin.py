@@ -37,8 +37,9 @@ class PartialHomeFeatureInline(admin.TabularInline):
 
 @admin.register(Agent)
 class AgentAdmin(admin.ModelAdmin):
-    list_display = ("public_id", "name", "email", "phone")
-    search_fields = ("public_id", "name", "email", "phone")
+    list_display = ("public_id", "name", "email", "phone", "agent_code")
+    search_fields = ("public_id", "name", "email", "phone", "agent_code")
+    readonly_fields = ("public_id", "agent_code")
 
 
 @admin.register(Property)
