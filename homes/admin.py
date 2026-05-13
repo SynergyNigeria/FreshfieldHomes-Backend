@@ -2,6 +2,7 @@ from django.contrib import admin
 
 from .models import (
     Agent,
+    AgentApplication,
     ChatInquiry,
     ContactMessage,
     CounterPayRequest,
@@ -75,3 +76,11 @@ class ChatInquiryAdmin(admin.ModelAdmin):
     list_display = ("id", "email", "source", "created_at")
     list_filter = ("source", "created_at")
     search_fields = ("email", "message")
+
+
+@admin.register(AgentApplication)
+class AgentApplicationAdmin(admin.ModelAdmin):
+    list_display = ("id", "full_name", "email", "country", "phone", "status", "created_at")
+    list_filter = ("status", "country", "created_at")
+    search_fields = ("full_name", "email", "phone")
+    readonly_fields = ("payment_token", "created_at", "updated_at")

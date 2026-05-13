@@ -2,6 +2,7 @@ from rest_framework import serializers
 
 from .models import (
     Agent,
+    AgentApplication,
     ChatInquiry,
     ContactMessage,
     CounterPayRequest,
@@ -374,3 +375,29 @@ class LiveChatThreadSerializer(serializers.ModelSerializer):
         if not message:
             return None
         return LiveChatMessageSerializer(message).data
+
+
+class AgentApplicationCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AgentApplication
+        fields = ["full_name", "country", "email", "phone"]
+
+    def validate_email(self, value):
+        if AgentApplication.objects.filter(email=value).exists():
+            raise serializers.ValidationError("An application with this email already exists.")
+        return value
+
+
+class AgentApplicationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AgentApplication
+        fields = [
+            "id", "full_name", "country", "email", "phone",
+            "status", "rejection_reason", "created_at", "updated_at",
+        ]
+
+
+class AgentApplicationStatusSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AgentApplication
+        fields = ["status", "rejection_reason"]

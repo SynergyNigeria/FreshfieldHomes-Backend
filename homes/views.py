@@ -10,10 +10,13 @@ from rest_framework import mixins, permissions, status, viewsets
 from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
 
-from .models import Agent, ChatInquiry, ContactMessage, CounterPayRequest, LiveChatMessage, LiveChatThread, PartialHome, Property
+from .models import Agent, AgentApplication, ChatInquiry, ContactMessage, CounterPayRequest, LiveChatMessage, LiveChatThread, PartialHome, Property
 from .permissions import HasAgentCode, HasOwnerAdminCode
 from .serializers import (
     AgentAdminSerializer,
+    AgentApplicationCreateSerializer,
+    AgentApplicationSerializer,
+    AgentApplicationStatusSerializer,
     AgentSerializer,
     ChatInquiryAdminSerializer,
     ChatInquiryCreateSerializer,
@@ -500,3 +503,118 @@ def agent_portal_chat_thread_reply(request, thread_id):
         text=text,
     )
     return Response(LiveChatMessageSerializer(message).data, status=201)
+
+
+# ---------------------------------------------------------------------------
+# Agent application views
+# ---------------------------------------------------------------------------
+
+@api_view(["POST"])
+def agent_application_create(request):
+    """Public endpoint: anyone can submit an agent application."""
+    serializer = AgentApplicationCreateSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=400)
+    application = serializer.save()
+    return Response(AgentApplicationSerializer(application).data, status=201)
+
+
+@api_view(["GET"])
+def agent_application_list(request):
+    """Admin: list all applications."""
+    if not HasOwnerAdminCode().has_permission(request, None):
+        return Response({"detail": "Forbidden."}, status=403)
+    apps = AgentApplication.objects.all()
+    return Response(AgentApplicationSerializer(apps, many=True).data)
+
+
+@api_view(["POST"])
+def agent_application_decide(request, app_id):
+    """Admin: approve or reject an application."""
+    if not HasOwnerAdminCode().has_permission(request, None):
+        return Response({"detail": "Forbidden."}, status=403)
+
+    try:
+        application = AgentApplication.objects.get(pk=app_id)
+    except AgentApplication.DoesNotExist:
+        return Response({"detail": "Not found."}, status=404)
+
+    serializer = AgentApplicationStatusSerializer(application, data=request.data, partial=True)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=400)
+
+    decision = request.data.get("status")
+    if decision not in ("approved", "rejected"):
+        return Response({"detail": "status must be 'approved' or 'rejected'."}, status=400)
+
+    if decision == "approved" and not application.payment_token:
+        import secrets
+        application.payment_token = secrets.token_urlsafe(32)
+
+    serializer.save()
+    return Response(AgentApplicationSerializer(application).data)
+
+
+@api_view(["GET"])
+def agent_application_status(request):
+    """Public: check application status by email."""
+    email = (request.query_params.get("email") or "").strip().lower()
+    if not email:
+        return Response({"detail": "email query param required."}, status=400)
+    try:
+        application = AgentApplication.objects.get(email__iexact=email)
+    except AgentApplication.DoesNotExist:
+        return Response({"detail": "No application found for this email."}, status=404)
+    return Response(AgentApplicationSerializer(application).data)
+
+
+@api_view(["POST"])
+def agent_application_complete_payment(request):
+    """
+    Called after the $25 payment is confirmed client-side.
+    Verifies the payment_token, creates an Agent record, and marks the
+    application as paid/activated.
+    """
+    email = (request.data.get("email") or "").strip().lower()
+    token = (request.data.get("payment_token") or "").strip()
+
+    if not email or not token:
+        return Response({"detail": "email and payment_token are required."}, status=400)
+
+    try:
+        application = AgentApplication.objects.get(email__iexact=email)
+    except AgentApplication.DoesNotExist:
+        return Response({"detail": "Application not found."}, status=404)
+
+    if application.status != "approved":
+        return Response({"detail": "Application is not approved."}, status=400)
+
+    if application.payment_token != token:
+        return Response({"detail": "Invalid payment token."}, status=400)
+
+    if application.status == "paid":
+        return Response({"detail": "Already activated."}, status=400)
+
+    # Create the Agent record if not already there
+    agent, created = Agent.objects.get_or_create(
+        email__iexact=application.email,
+        defaults={
+            "name": application.full_name,
+            "phone": application.phone,
+            "email": application.email,
+            "image": "",
+        },
+    )
+    if not created:
+        # Update name/phone in case they changed
+        agent.name = application.full_name
+        agent.phone = application.phone
+        agent.save(update_fields=["name", "phone"])
+
+    application.status = "paid"
+    application.save(update_fields=["status", "updated_at"])
+
+    return Response({
+        "detail": "Payment confirmed. Your agent account is now active.",
+        "agent_code": agent.agent_code,
+    })

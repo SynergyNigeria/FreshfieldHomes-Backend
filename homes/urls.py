@@ -10,6 +10,11 @@ from .views import (
     CounterPayRequestViewSet,
     PartialHomeViewSet,
     PropertyViewSet,
+    agent_application_complete_payment,
+    agent_application_create,
+    agent_application_decide,
+    agent_application_list,
+    agent_application_status,
     agent_portal_chat_thread_messages,
     agent_portal_chat_thread_reply,
     agent_portal_chat_threads,
@@ -46,4 +51,10 @@ urlpatterns = [
     path("chat/start/", user_chat_start, name="user-chat-start"),
     path("chat/<int:thread_id>/send/", user_chat_send, name="user-chat-send"),
     path("chat/<int:thread_id>/messages/", user_chat_messages, name="user-chat-messages"),
+    # Agent applications
+    path("agent-applications/", agent_application_create, name="agent-application-create"),
+    path("agent-applications/list/", agent_application_list, name="agent-application-list"),
+    path("agent-applications/status/", agent_application_status, name="agent-application-status"),
+    path("agent-applications/<int:app_id>/decide/", agent_application_decide, name="agent-application-decide"),
+    path("agent-applications/complete-payment/", agent_application_complete_payment, name="agent-application-complete-payment"),
 ]
